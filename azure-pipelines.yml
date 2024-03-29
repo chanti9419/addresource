@@ -1,0 +1,94 @@
+# 'Allow scripts to access the OAuth token' was selected in pipeline.  Add the following YAML to any steps requiring access:
+#       env:
+#           MY_ACCESS_TOKEN: $(System.AccessToken)
+# Variable 'TF_CLI_CONFIG_FILE' was defined in the Variables tab
+# Variable 'TF_WORKSPACE' was defined in the Variables tab
+# Variable 'tfe_workspace_token' was defined in the Variables tab
+# Variable 'tfe_workspace_url' was defined in the Variables tab
+
+#schedules:
+#- cron: "0 0 1 10 *" # cron syntax defining a schedule
+#  displayName: Monthly rebuild # friendly name given to a specific schedule
+#  branches:
+#    include:
+#    - main # which branches the schedule applies to
+#  always: true # whether to always run the pipeline or only if there have been source code changes since the last successful scheduled run. The default is false.
+
+# Approval tasks associated with the release pipeline need to be completed before the code is deployed
+
+trigger:
+  branches:
+    include:
+    - refs/heads/main
+jobs:
+- job: Phase_1
+  displayName: Agent job 1
+  cancelTimeoutInMinutes: 1
+  pool:
+    name: Linux-NextGen
+  steps:
+  - checkout: self
+    clean: False
+    persistCredentials: True
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform 0.14.7
+    inputs:
+      terraformVersion: 0.14.7
+  - task: replacetokens@3
+    displayName: Replace tokens in **/*.tf **/*.tfvars
+    inputs:
+      rootDirectory: $(Build.SourcesDirectory)
+      targetFiles: >-
+        **/*.tf
+
+        **/*.tfvars
+  - task: CmdLine@2
+    displayName: Create .terraformrc file from Secrets
+    inputs:
+      script: >-
+        # create a .terraformrc file from your secret token
+
+        cat > $(TF_CLI_CONFIG_FILE) <<EOF
+
+        credentials "$(tfc_workspace_url)" {
+
+        token = "$(tfc_workspace_token)"}
+
+        EOF
+  - task: CmdLine@2
+    displayName: 'Terraform INIT '
+    inputs:
+      script: >-
+        terraform version
+
+        terraform get -update
+
+        terraform init
+
+        terraform providers
+      workingDirectory: $(Build.SourcesDirectory)
+      failOnStderr: true
+  - task: CmdLine@2
+    displayName: Terraform VALIDATE
+    enabled: False
+    inputs:
+      script: 'terraform validate '
+      workingDirectory: $(workingDirectory)
+      failOnStderr: true
+  - task: CmdLine@2
+    displayName: Terraform PLAN
+    inputs:
+      script: terraform plan
+      workingDirectory: $(Build.SourcesDirectory)
+      failOnStderr: true
+  - task: HeimdallBuildTask@1
+    displayName: Terrafrom Validator
+  - task: GlapiHeadlessBuild@1
+    displayName: Greenlight API-Certifies a Build 
+    inputs:
+      GreenlightApiConnection: 'Greenlight Api - Prod'
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: Job1'
+    inputs:
+      PathtoPublish: $(Pipeline.Workspace)
+      ArtifactName: Job1
